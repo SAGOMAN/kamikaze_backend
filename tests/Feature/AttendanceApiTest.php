@@ -160,4 +160,73 @@ class AttendanceApiTest extends TestCase
 
         $this->assertSoftDeleted('attendances', ['id' => $created['id']]);
     }
+
+    public function test_store_restores_soft_deleted_attendance(): void
+    {
+        $created = $this->postJson('/api/attendances', [
+            'student_id' => $this->student->id,
+            'class_schedule_id' => $this->morning->id,
+            'attendance_date' => '2026-07-30',
+            'notes' => 'primera',
+        ])->assertCreated()->json();
+
+        $this->deleteJson('/api/attendances/'.$created['id'])->assertNoContent();
+        $this->assertSoftDeleted('attendances', ['id' => $created['id']]);
+
+        $restored = $this->postJson('/api/attendances', [
+            'student_id' => $this->student->id,
+            'class_schedule_id' => $this->morning->id,
+            'attendance_date' => '2026-07-30',
+            'notes' => 'remarcada',
+        ])->assertCreated()
+            ->assertJsonMissingPath('exception')
+            ->assertJsonMissingPath('trace')
+            ->json();
+
+        $this->assertSame($created['id'], $restored['id']);
+        $this->assertSame('remarcada', $restored['notes']);
+        $this->assertDatabaseCount('attendances', 1);
+        $this->assertDatabaseHas('attendances', [
+            'id' => $created['id'],
+            'student_id' => $this->student->id,
+            'class_schedule_id' => $this->morning->id,
+            'notes' => 'remarcada',
+            'deleted_at' => null,
+        ]);
+    }
+
+    public function test_store_validation_errors_do_not_expose_sql(): void
+    {
+        $response = $this->postJson('/api/attendances', [
+            'student_id' => $this->student->id,
+            'class_schedule_id' => $this->morning->id,
+            'attendance_date' => '2026-07-31',
+        ])->assertStatus(422);
+
+        $body = $response->getContent();
+        $this->assertStringNotContainsString('SQLSTATE', $body);
+        $this->assertStringNotContainsString('attendances_unique_schedule_day', $body);
+        $this->assertStringNotContainsString('"trace"', $body);
+        $this->assertStringNotContainsString('"exception"', $body);
+    }
+
+    public function test_store_rejects_branch_mismatch_without_sql_leak(): void
+    {
+        $otherBranch = Branch::query()->create([
+            'name' => 'Norte',
+            'is_active' => true,
+        ]);
+
+        $response = $this->postJson('/api/attendances', [
+            'student_id' => $this->student->id,
+            'class_schedule_id' => $this->morning->id,
+            'branch_id' => $otherBranch->id,
+            'attendance_date' => '2026-07-30',
+        ])->assertStatus(422)
+            ->assertJsonValidationErrors(['branch_id']);
+
+        $body = $response->getContent();
+        $this->assertStringNotContainsString('SQLSTATE', $body);
+        $this->assertStringNotContainsString('"trace"', $body);
+    }
 }

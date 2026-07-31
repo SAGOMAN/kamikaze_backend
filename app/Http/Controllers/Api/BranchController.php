@@ -34,7 +34,10 @@ class BranchController extends Controller
             'name' => ['required', 'string', 'max:255'],
             'address' => ['nullable', 'string', 'max:255'],
             'is_active' => ['sometimes', 'boolean'],
+            'color' => ['required', 'string', 'regex:/^#[0-9A-Fa-f]{6}$/'],
         ]);
+
+        $data['color'] = strtoupper($data['color']);
 
         $branch = Branch::query()->create($data);
 
@@ -52,7 +55,12 @@ class BranchController extends Controller
             'name' => ['sometimes', 'string', 'max:255'],
             'address' => ['nullable', 'string', 'max:255'],
             'is_active' => ['sometimes', 'boolean'],
+            'color' => ['sometimes', 'string', 'regex:/^#[0-9A-Fa-f]{6}$/'],
         ]);
+
+        if (isset($data['color'])) {
+            $data['color'] = strtoupper($data['color']);
+        }
 
         $branch->update($data);
 

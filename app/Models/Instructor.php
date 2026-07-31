@@ -16,6 +16,7 @@ class Instructor extends Model
         'phone',
         'email',
         'is_active',
+        'color',
         'notes',
     ];
 

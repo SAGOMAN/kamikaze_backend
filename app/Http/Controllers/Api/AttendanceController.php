@@ -7,8 +7,10 @@ use App\Http\Controllers\Controller;
 use App\Models\Attendance;
 use App\Models\ClassSchedule;
 use Carbon\Carbon;
+use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
 class AttendanceController extends Controller
@@ -74,25 +76,26 @@ class AttendanceController extends Controller
             ]);
         }
 
-        $attendance = Attendance::query()
-            ->where('student_id', $data['student_id'])
-            ->where('class_schedule_id', $data['class_schedule_id'])
-            ->whereDate('attendance_date', $data['attendance_date'])
-            ->first();
+        try {
+            $attendance = DB::transaction(function () use ($data, $schedule) {
+                return $this->upsertAttendance($data, $schedule);
+            });
+        } catch (UniqueConstraintViolationException) {
+            $attendance = DB::transaction(function () use ($data, $schedule) {
+                $existing = $this->findAttendanceIncludingTrashed(
+                    (int) $data['student_id'],
+                    (int) $data['class_schedule_id'],
+                    $data['attendance_date'],
+                );
 
-        if ($attendance) {
-            $attendance->update([
-                'branch_id' => $schedule->branch_id,
-                'notes' => $data['notes'] ?? null,
-            ]);
-        } else {
-            $attendance = Attendance::query()->create([
-                'student_id' => $data['student_id'],
-                'class_schedule_id' => $data['class_schedule_id'],
-                'attendance_date' => $data['attendance_date'],
-                'branch_id' => $schedule->branch_id,
-                'notes' => $data['notes'] ?? null,
-            ]);
+                if (! $existing) {
+                    throw ValidationException::withMessages([
+                        'student_id' => ['Ya existe una asistencia para este alumno, horario y fecha.'],
+                    ]);
+                }
+
+                return $this->restoreAndUpdateAttendance($existing, $schedule, $data['notes'] ?? null);
+            });
         }
 
         return response()->json(
@@ -106,5 +109,52 @@ class AttendanceController extends Controller
         $attendance->delete();
 
         return response()->json(null, 204);
+    }
+
+    /**
+     * @param  array{student_id: int|string, class_schedule_id: int|string, attendance_date: string, notes?: string|null}  $data
+     */
+    private function upsertAttendance(array $data, ClassSchedule $schedule): Attendance
+    {
+        $attendance = $this->findAttendanceIncludingTrashed(
+            (int) $data['student_id'],
+            (int) $data['class_schedule_id'],
+            $data['attendance_date'],
+        );
+
+        if ($attendance) {
+            return $this->restoreAndUpdateAttendance($attendance, $schedule, $data['notes'] ?? null);
+        }
+
+        return Attendance::query()->create([
+            'student_id' => $data['student_id'],
+            'class_schedule_id' => $data['class_schedule_id'],
+            'attendance_date' => $data['attendance_date'],
+            'branch_id' => $schedule->branch_id,
+            'notes' => $data['notes'] ?? null,
+        ]);
+    }
+
+    private function findAttendanceIncludingTrashed(int $studentId, int $classScheduleId, string $attendanceDate): ?Attendance
+    {
+        return Attendance::withTrashed()
+            ->where('student_id', $studentId)
+            ->where('class_schedule_id', $classScheduleId)
+            ->whereDate('attendance_date', $attendanceDate)
+            ->first();
+    }
+
+    private function restoreAndUpdateAttendance(Attendance $attendance, ClassSchedule $schedule, ?string $notes): Attendance
+    {
+        if ($attendance->trashed()) {
+            $attendance->restore();
+        }
+
+        $attendance->update([
+            'branch_id' => $schedule->branch_id,
+            'notes' => $notes,
+        ]);
+
+        return $attendance->refresh();
     }
 }

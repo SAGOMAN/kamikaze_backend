@@ -37,8 +37,11 @@ class InstructorController extends Controller
             'phone' => ['nullable', 'string', 'max:50'],
             'email' => ['nullable', 'email', 'max:255'],
             'is_active' => ['sometimes', 'boolean'],
+            'color' => ['required', 'string', 'regex:/^#[0-9A-Fa-f]{6}$/'],
             'notes' => ['nullable', 'string'],
         ]);
+
+        $data['color'] = strtoupper($data['color']);
 
         $instructor = Instructor::query()->create($data);
 
@@ -57,8 +60,13 @@ class InstructorController extends Controller
             'phone' => ['nullable', 'string', 'max:50'],
             'email' => ['nullable', 'email', 'max:255'],
             'is_active' => ['sometimes', 'boolean'],
+            'color' => ['sometimes', 'string', 'regex:/^#[0-9A-Fa-f]{6}$/'],
             'notes' => ['nullable', 'string'],
         ]);
+
+        if (isset($data['color'])) {
+            $data['color'] = strtoupper($data['color']);
+        }
 
         $instructor->update($data);
 

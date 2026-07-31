@@ -22,8 +22,8 @@ class DatabaseSeeder extends Seeder
         );
 
         $branches = [
-            ['name' => 'Hanuman Style Centro', 'address' => 'Sucursal Centro', 'is_active' => true],
-            ['name' => 'Hanuman Style Norte', 'address' => 'Sucursal Norte', 'is_active' => true],
+            ['name' => 'Hanuman Style Centro', 'address' => 'Sucursal Centro', 'is_active' => true, 'color' => '#C45C26'],
+            ['name' => 'Hanuman Style Norte', 'address' => 'Sucursal Norte', 'is_active' => true, 'color' => '#1F6B4A'],
         ];
 
         foreach ($branches as $branchData) {

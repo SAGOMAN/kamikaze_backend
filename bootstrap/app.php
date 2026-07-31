@@ -1,5 +1,7 @@
 <?php
 
+use Illuminate\Database\QueryException;
+use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
@@ -19,4 +21,32 @@ return Application::configure(basePath: dirname(__DIR__))
         $exceptions->shouldRenderJsonWhen(
             fn (Request $request) => $request->is('api/*'),
         );
+
+        $exceptions->render(function (UniqueConstraintViolationException $e, Request $request) {
+            if (! $request->is('api/*')) {
+                return null;
+            }
+
+            return response()->json([
+                'message' => 'El registro ya existe.',
+                'errors' => [
+                    'record' => ['El registro ya existe.'],
+                ],
+            ], 422);
+        });
+
+        $exceptions->render(function (QueryException $e, Request $request) {
+            if (! $request->is('api/*')) {
+                return null;
+            }
+
+            // UniqueConstraintViolationException extends QueryException; handled above.
+            if ($e instanceof UniqueConstraintViolationException) {
+                return null;
+            }
+
+            return response()->json([
+                'message' => 'Error interno del servidor.',
+            ], 500);
+        });
     })->create();
