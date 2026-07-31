@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Api;
 
+use App\Http\Controllers\Api\Concerns\RespondsWithPaginatedList;
 use App\Http\Controllers\Controller;
 use App\Models\Student;
 use Illuminate\Http\JsonResponse;
@@ -9,6 +10,8 @@ use Illuminate\Http\Request;
 
 class StudentController extends Controller
 {
+    use RespondsWithPaginatedList;
+
     public function index(Request $request): JsonResponse
     {
         $query = Student::query()->orderBy('last_name')->orderBy('first_name');
@@ -17,16 +20,15 @@ class StudentController extends Controller
             $query->where('is_active', filter_var($request->query('is_active'), FILTER_VALIDATE_BOOLEAN));
         }
 
-        if ($request->filled('search')) {
-            $search = '%'.$request->query('search').'%';
-            $query->where(function ($q) use ($search) {
-                $q->where('first_name', 'like', $search)
-                    ->orWhere('last_name', 'like', $search)
-                    ->orWhere('nickname', 'like', $search);
-            });
-        }
+        $this->applySearch($query, $request, function ($q, string $like) {
+            $q->where('first_name', 'like', $like)
+                ->orWhere('last_name', 'like', $like)
+                ->orWhere('nickname', 'like', $like)
+                ->orWhere('email', 'like', $like)
+                ->orWhere('phone', 'like', $like);
+        });
 
-        return response()->json($query->get());
+        return $this->respondList($request, $query);
     }
 
     public function store(Request $request): JsonResponse

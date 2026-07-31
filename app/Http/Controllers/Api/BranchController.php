@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Api;
 
+use App\Http\Controllers\Api\Concerns\RespondsWithPaginatedList;
 use App\Http\Controllers\Controller;
 use App\Models\Branch;
 use Illuminate\Http\JsonResponse;
@@ -9,9 +10,22 @@ use Illuminate\Http\Request;
 
 class BranchController extends Controller
 {
-    public function index(): JsonResponse
+    use RespondsWithPaginatedList;
+
+    public function index(Request $request): JsonResponse
     {
-        return response()->json(Branch::query()->orderBy('name')->get());
+        $query = Branch::query()->orderBy('name');
+
+        if ($request->filled('is_active')) {
+            $query->where('is_active', filter_var($request->query('is_active'), FILTER_VALIDATE_BOOLEAN));
+        }
+
+        $this->applySearch($query, $request, function ($q, string $like) {
+            $q->where('name', 'like', $like)
+                ->orWhere('address', 'like', $like);
+        });
+
+        return $this->respondList($request, $query);
     }
 
     public function store(Request $request): JsonResponse

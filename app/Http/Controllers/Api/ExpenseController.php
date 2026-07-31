@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Api;
 
+use App\Http\Controllers\Api\Concerns\RespondsWithPaginatedList;
 use App\Http\Controllers\Controller;
 use App\Models\Expense;
 use Illuminate\Http\JsonResponse;
@@ -9,6 +10,8 @@ use Illuminate\Http\Request;
 
 class ExpenseController extends Controller
 {
+    use RespondsWithPaginatedList;
+
     public function index(Request $request): JsonResponse
     {
         $query = Expense::query()
@@ -27,7 +30,14 @@ class ExpenseController extends Controller
             $query->whereDate('expense_date', '<=', $request->query('to'));
         }
 
-        return response()->json($query->get());
+        $this->applySearch($query, $request, function ($q, string $like) {
+            $q->where('category', 'like', $like)
+                ->orWhere('description', 'like', $like)
+                ->orWhere('notes', 'like', $like)
+                ->orWhereHas('branch', fn ($b) => $b->where('name', 'like', $like));
+        });
+
+        return $this->respondList($request, $query);
     }
 
     public function store(Request $request): JsonResponse

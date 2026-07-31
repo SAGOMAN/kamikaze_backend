@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Api;
 
+use App\Http\Controllers\Api\Concerns\RespondsWithPaginatedList;
 use App\Http\Controllers\Controller;
 use App\Models\Product;
 use App\Models\ProductStock;
@@ -14,6 +15,8 @@ use Illuminate\Validation\ValidationException;
 
 class SaleController extends Controller
 {
+    use RespondsWithPaginatedList;
+
     public function index(Request $request): JsonResponse
     {
         $query = Sale::query()
@@ -32,7 +35,13 @@ class SaleController extends Controller
             $query->whereDate('sale_date', '<=', $request->query('to'));
         }
 
-        return response()->json($query->get());
+        $this->applySearch($query, $request, function ($q, string $like) {
+            $q->where('notes', 'like', $like)
+                ->orWhereHas('branch', fn ($b) => $b->where('name', 'like', $like))
+                ->orWhereHas('items.product', fn ($p) => $p->where('name', 'like', $like)->orWhere('sku', 'like', $like));
+        });
+
+        return $this->respondList($request, $query);
     }
 
     public function store(Request $request): JsonResponse

@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Api;
 
+use App\Http\Controllers\Api\Concerns\RespondsWithPaginatedList;
 use App\Http\Controllers\Controller;
 use App\Models\Product;
 use Illuminate\Http\JsonResponse;
@@ -9,6 +10,8 @@ use Illuminate\Http\Request;
 
 class ProductController extends Controller
 {
+    use RespondsWithPaginatedList;
+
     public function index(Request $request): JsonResponse
     {
         $query = Product::query()->with('stocks.branch')->orderBy('name');
@@ -17,7 +20,13 @@ class ProductController extends Controller
             $query->where('is_active', filter_var($request->query('is_active'), FILTER_VALIDATE_BOOLEAN));
         }
 
-        return response()->json($query->get());
+        $this->applySearch($query, $request, function ($q, string $like) {
+            $q->where('name', 'like', $like)
+                ->orWhere('sku', 'like', $like)
+                ->orWhere('description', 'like', $like);
+        });
+
+        return $this->respondList($request, $query);
     }
 
     public function store(Request $request): JsonResponse

@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Api;
 
+use App\Http\Controllers\Api\Concerns\RespondsWithPaginatedList;
 use App\Http\Controllers\Controller;
 use App\Models\ClassSchedule;
 use Illuminate\Http\JsonResponse;
@@ -9,6 +10,8 @@ use Illuminate\Http\Request;
 
 class ClassScheduleController extends Controller
 {
+    use RespondsWithPaginatedList;
+
     public function index(Request $request): JsonResponse
     {
         $query = ClassSchedule::query()
@@ -28,7 +31,17 @@ class ClassScheduleController extends Controller
             $query->where('day_of_week', $request->query('day_of_week'));
         }
 
-        return response()->json($query->get());
+        if ($request->filled('is_active')) {
+            $query->where('is_active', filter_var($request->query('is_active'), FILTER_VALIDATE_BOOLEAN));
+        }
+
+        $this->applySearch($query, $request, function ($q, string $like) {
+            $q->where('notes', 'like', $like)
+                ->orWhereHas('instructor', fn ($i) => $i->where('name', 'like', $like))
+                ->orWhereHas('branch', fn ($b) => $b->where('name', 'like', $like));
+        });
+
+        return $this->respondList($request, $query);
     }
 
     public function store(Request $request): JsonResponse

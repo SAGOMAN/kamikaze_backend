@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Api;
 
+use App\Http\Controllers\Api\Concerns\RespondsWithPaginatedList;
 use App\Http\Controllers\Controller;
 use App\Models\ProductStock;
 use App\Models\StockMovement;
@@ -11,6 +12,8 @@ use Illuminate\Support\Facades\DB;
 
 class ProductStockController extends Controller
 {
+    use RespondsWithPaginatedList;
+
     public function index(Request $request): JsonResponse
     {
         $query = ProductStock::query()->with(['product', 'branch']);
@@ -23,7 +26,13 @@ class ProductStockController extends Controller
             $query->where('product_id', $request->query('product_id'));
         }
 
-        return response()->json($query->get());
+        $this->applySearch($query, $request, function ($q, string $like) {
+            $q->whereHas('product', function ($p) use ($like) {
+                $p->where('name', 'like', $like)->orWhere('sku', 'like', $like);
+            })->orWhereHas('branch', fn ($b) => $b->where('name', 'like', $like));
+        });
+
+        return $this->respondList($request, $query);
     }
 
     public function upsert(Request $request): JsonResponse

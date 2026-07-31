@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Api;
 
+use App\Http\Controllers\Api\Concerns\RespondsWithPaginatedList;
 use App\Http\Controllers\Controller;
 use App\Models\MembershipPayment;
 use Illuminate\Http\JsonResponse;
@@ -9,6 +10,8 @@ use Illuminate\Http\Request;
 
 class MembershipPaymentController extends Controller
 {
+    use RespondsWithPaginatedList;
+
     public function index(Request $request): JsonResponse
     {
         $query = MembershipPayment::query()
@@ -31,7 +34,18 @@ class MembershipPaymentController extends Controller
             $query->whereDate('payment_date', '<=', $request->query('to'));
         }
 
-        return response()->json($query->get());
+        $this->applySearch($query, $request, function ($q, string $like) {
+            $q->where('notes', 'like', $like)
+                ->orWhere('payment_method', 'like', $like)
+                ->orWhere('period_month', 'like', $like)
+                ->orWhereHas('student', function ($s) use ($like) {
+                    $s->where('first_name', 'like', $like)
+                        ->orWhere('last_name', 'like', $like)
+                        ->orWhere('nickname', 'like', $like);
+                });
+        });
+
+        return $this->respondList($request, $query);
     }
 
     public function store(Request $request): JsonResponse

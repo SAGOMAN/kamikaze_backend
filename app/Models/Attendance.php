@@ -14,6 +14,7 @@ class Attendance extends Model
     protected $fillable = [
         'student_id',
         'branch_id',
+        'class_schedule_id',
         'attendance_date',
         'notes',
     ];
@@ -33,5 +34,10 @@ class Attendance extends Model
     public function branch(): BelongsTo
     {
         return $this->belongsTo(Branch::class);
+    }
+
+    public function classSchedule(): BelongsTo
+    {
+        return $this->belongsTo(ClassSchedule::class);
     }
 }
