@@ -30,6 +30,8 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::apiResource('sales', SaleController::class)->only(['index', 'store', 'show', 'destroy']);
     Route::apiResource('expenses', ExpenseController::class);
     Route::get('reports/monthly', [ReportController::class, 'monthly']);
+    Route::get('reports/period', [ReportController::class, 'period']);
+    Route::get('reports/period/export', [ReportController::class, 'export']);
     Route::apiResource('instructors', InstructorController::class);
     Route::apiResource('class-schedules', ClassScheduleController::class);
 });

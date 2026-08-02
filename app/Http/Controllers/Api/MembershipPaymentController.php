@@ -26,6 +26,14 @@ class MembershipPaymentController extends Controller
             $query->where('period_month', $request->query('period_month'));
         }
 
+        if ($request->filled('year')) {
+            $year = (int) $request->query('year');
+            if ($year >= 1000 && $year <= 9999) {
+                $query->where('period_month', '>=', sprintf('%04d-01', $year))
+                    ->where('period_month', '<=', sprintf('%04d-12', $year));
+            }
+        }
+
         if ($request->filled('from')) {
             $query->whereDate('payment_date', '>=', $request->query('from'));
         }
