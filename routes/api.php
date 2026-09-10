@@ -12,6 +12,7 @@ use App\Http\Controllers\Api\ProductStockController;
 use App\Http\Controllers\Api\ReportController;
 use App\Http\Controllers\Api\SaleController;
 use App\Http\Controllers\Api\StudentController;
+use App\Http\Controllers\Api\UserController;
 use Illuminate\Support\Facades\Route;
 
 Route::post('/login', [AuthController::class, 'login']);
@@ -19,6 +20,10 @@ Route::post('/login', [AuthController::class, 'login']);
 Route::middleware('auth:sanctum')->group(function () {
     Route::post('/logout', [AuthController::class, 'logout']);
     Route::get('/me', [AuthController::class, 'me']);
+    Route::put('/me/password', [AuthController::class, 'updatePassword']);
+
+    Route::apiResource('users', UserController::class)->except(['destroy']);
+    Route::put('users/{user}/password', [UserController::class, 'updatePassword']);
 
     Route::apiResource('branches', BranchController::class);
     Route::apiResource('students', StudentController::class);

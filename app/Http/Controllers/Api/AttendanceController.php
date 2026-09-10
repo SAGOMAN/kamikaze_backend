@@ -6,6 +6,7 @@ use App\Http\Controllers\Api\Concerns\RespondsWithPaginatedList;
 use App\Http\Controllers\Controller;
 use App\Models\Attendance;
 use App\Models\ClassSchedule;
+use App\Support\BusinessClock;
 use Carbon\Carbon;
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Http\JsonResponse;
@@ -20,7 +21,7 @@ class AttendanceController extends Controller
     public function index(Request $request): JsonResponse
     {
         $query = Attendance::query()
-            ->with(['student', 'branch', 'classSchedule.instructor'])
+            ->with(['student', 'branch', 'classSchedule.instructor', 'classSchedule.branch'])
             ->orderByDesc('attendance_date');
 
         if ($request->filled('date')) {
@@ -62,26 +63,28 @@ class AttendanceController extends Controller
         ]);
 
         $schedule = ClassSchedule::query()->findOrFail($data['class_schedule_id']);
+        $attendanceDate = Carbon::parse($data['attendance_date'])->toDateString();
 
-        $attendanceDate = Carbon::parse($data['attendance_date']);
-        if ((int) $schedule->day_of_week !== (int) $attendanceDate->dayOfWeek) {
-            throw ValidationException::withMessages([
-                'class_schedule_id' => ['El horario no corresponde al día de la fecha indicada.'],
-            ]);
-        }
-
-        if (isset($data['branch_id']) && (int) $data['branch_id'] !== (int) $schedule->branch_id) {
-            throw ValidationException::withMessages([
-                'branch_id' => ['La sucursal no coincide con la del horario seleccionado.'],
-            ]);
-        }
+        $this->assertCanMark($data, $schedule, $attendanceDate);
 
         try {
-            $attendance = DB::transaction(function () use ($data, $schedule) {
+            $attendance = DB::transaction(function () use ($data, $schedule, $attendanceDate) {
+                $this->assertNoOverlappingPresence(
+                    (int) $data['student_id'],
+                    $schedule,
+                    $attendanceDate,
+                );
+
                 return $this->upsertAttendance($data, $schedule);
             });
         } catch (UniqueConstraintViolationException) {
-            $attendance = DB::transaction(function () use ($data, $schedule) {
+            $attendance = DB::transaction(function () use ($data, $schedule, $attendanceDate) {
+                $this->assertNoOverlappingPresence(
+                    (int) $data['student_id'],
+                    $schedule,
+                    $attendanceDate,
+                );
+
                 $existing = $this->findAttendanceIncludingTrashed(
                     (int) $data['student_id'],
                     (int) $data['class_schedule_id'],
@@ -109,6 +112,70 @@ class AttendanceController extends Controller
         $attendance->delete();
 
         return response()->json(null, 204);
+    }
+
+    /**
+     * @param  array{student_id: int|string, class_schedule_id: int|string, attendance_date: string, branch_id?: int|string, notes?: string|null}  $data
+     */
+    private function assertCanMark(array $data, ClassSchedule $schedule, string $attendanceDate): void
+    {
+        if ($attendanceDate !== BusinessClock::todayDate()) {
+            throw ValidationException::withMessages([
+                'attendance_date' => ['Solo se puede marcar asistencia en el día de hoy.'],
+            ]);
+        }
+
+        if (! $schedule->is_active) {
+            throw ValidationException::withMessages([
+                'class_schedule_id' => ['El horario no está activo.'],
+            ]);
+        }
+
+        if ((int) $schedule->day_of_week !== (int) Carbon::parse($attendanceDate)->dayOfWeek) {
+            throw ValidationException::withMessages([
+                'class_schedule_id' => ['El horario no corresponde al día de la fecha indicada.'],
+            ]);
+        }
+
+        if (! $schedule->occursAt(BusinessClock::now())) {
+            throw ValidationException::withMessages([
+                'class_schedule_id' => ['El horario no corresponde a la clase en curso.'],
+            ]);
+        }
+
+        if (isset($data['branch_id']) && (int) $data['branch_id'] !== (int) $schedule->branch_id) {
+            throw ValidationException::withMessages([
+                'branch_id' => ['La sucursal no coincide con la del horario seleccionado.'],
+            ]);
+        }
+    }
+
+    private function assertNoOverlappingPresence(int $studentId, ClassSchedule $schedule, string $attendanceDate): void
+    {
+        $others = Attendance::query()
+            ->where('student_id', $studentId)
+            ->whereDate('attendance_date', $attendanceDate)
+            ->where('class_schedule_id', '!=', $schedule->id)
+            ->whereNotNull('class_schedule_id')
+            ->with(['classSchedule.branch'])
+            ->lockForUpdate()
+            ->get();
+
+        foreach ($others as $other) {
+            $otherSchedule = $other->classSchedule;
+            if (! $otherSchedule || ! $schedule->overlapsWith($otherSchedule)) {
+                continue;
+            }
+
+            $branchName = $otherSchedule->branch?->name;
+            $message = $branchName
+                ? "El alumno ya está presente en otro horario (sucursal {$branchName})."
+                : 'El alumno ya está presente en otro horario o sucursal.';
+
+            throw ValidationException::withMessages([
+                'student_id' => [$message],
+            ]);
+        }
     }
 
     /**

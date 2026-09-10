@@ -2,11 +2,14 @@
 
 namespace Tests\Feature;
 
+use App\Models\Attendance;
 use App\Models\Branch;
 use App\Models\ClassSchedule;
 use App\Models\Instructor;
 use App\Models\Student;
 use App\Models\User;
+use App\Support\BusinessClock;
+use Carbon\Carbon;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Laravel\Sanctum\Sanctum;
 use Tests\TestCase;
@@ -21,6 +24,8 @@ class AttendanceApiTest extends TestCase
 
     private Student $student;
 
+    private Instructor $instructor;
+
     private ClassSchedule $morning;
 
     private ClassSchedule $evening;
@@ -28,6 +33,8 @@ class AttendanceApiTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
+
+        Carbon::setTestNow(Carbon::parse('2026-07-30 10:30:00', BusinessClock::TIMEZONE));
 
         $this->user = User::factory()->create();
         Sanctum::actingAs($this->user);
@@ -43,14 +50,14 @@ class AttendanceApiTest extends TestCase
             'is_active' => true,
         ]);
 
-        $instructor = Instructor::query()->create([
+        $this->instructor = Instructor::query()->create([
             'name' => 'Sensei Koji',
             'is_active' => true,
         ]);
 
         // 2026-07-30 = jueves = 4
         $this->morning = ClassSchedule::query()->create([
-            'instructor_id' => $instructor->id,
+            'instructor_id' => $this->instructor->id,
             'branch_id' => $this->branch->id,
             'day_of_week' => 4,
             'start_time' => '10:00',
@@ -59,13 +66,19 @@ class AttendanceApiTest extends TestCase
         ]);
 
         $this->evening = ClassSchedule::query()->create([
-            'instructor_id' => $instructor->id,
+            'instructor_id' => $this->instructor->id,
             'branch_id' => $this->branch->id,
             'day_of_week' => 4,
             'start_time' => '18:00',
             'end_time' => '20:00',
             'is_active' => true,
         ]);
+    }
+
+    protected function tearDown(): void
+    {
+        Carbon::setTestNow();
+        parent::tearDown();
     }
 
     public function test_store_requires_class_schedule_id(): void
@@ -78,24 +91,102 @@ class AttendanceApiTest extends TestCase
             ->assertJsonValidationErrors(['class_schedule_id']);
     }
 
-    public function test_store_rejects_schedule_for_wrong_weekday(): void
+    public function test_store_rejects_date_other_than_today(): void
     {
         $this->postJson('/api/attendances', [
             'student_id' => $this->student->id,
             'class_schedule_id' => $this->morning->id,
-            'attendance_date' => '2026-07-31', // viernes
+            'attendance_date' => '2026-07-31',
+        ])->assertStatus(422)
+            ->assertJsonValidationErrors(['attendance_date']);
+    }
+
+    public function test_store_rejects_schedule_for_wrong_weekday(): void
+    {
+        Carbon::setTestNow(Carbon::parse('2026-07-31 10:30:00', BusinessClock::TIMEZONE));
+
+        $this->postJson('/api/attendances', [
+            'student_id' => $this->student->id,
+            'class_schedule_id' => $this->morning->id,
+            'attendance_date' => '2026-07-31',
         ])->assertStatus(422)
             ->assertJsonValidationErrors(['class_schedule_id']);
     }
 
-    public function test_student_can_attend_multiple_schedules_same_day(): void
+    public function test_store_rejects_schedule_not_occurring_now(): void
     {
+        $this->postJson('/api/attendances', [
+            'student_id' => $this->student->id,
+            'class_schedule_id' => $this->evening->id,
+            'attendance_date' => '2026-07-30',
+        ])->assertStatus(422)
+            ->assertJsonValidationErrors(['class_schedule_id'])
+            ->assertJsonFragment(['El horario no corresponde a la clase en curso.']);
+    }
+
+    public function test_store_rejects_inactive_schedule(): void
+    {
+        $inactive = ClassSchedule::query()->create([
+            'instructor_id' => $this->instructor->id,
+            'branch_id' => $this->branch->id,
+            'day_of_week' => 4,
+            'start_time' => '10:00',
+            'end_time' => '11:00',
+            'is_active' => false,
+        ]);
+
+        $this->postJson('/api/attendances', [
+            'student_id' => $this->student->id,
+            'class_schedule_id' => $inactive->id,
+            'attendance_date' => '2026-07-30',
+        ])->assertStatus(422)
+            ->assertJsonValidationErrors(['class_schedule_id']);
+    }
+
+    public function test_student_cannot_attend_overlapping_schedule_other_branch(): void
+    {
+        $otherBranch = Branch::query()->create([
+            'name' => 'Norte',
+            'is_active' => true,
+        ]);
+
+        $otherMorning = ClassSchedule::query()->create([
+            'instructor_id' => $this->instructor->id,
+            'branch_id' => $otherBranch->id,
+            'day_of_week' => 4,
+            'start_time' => '10:00',
+            'end_time' => '11:30',
+            'is_active' => true,
+        ]);
+
         $this->postJson('/api/attendances', [
             'student_id' => $this->student->id,
             'class_schedule_id' => $this->morning->id,
             'branch_id' => $this->branch->id,
             'attendance_date' => '2026-07-30',
         ])->assertCreated();
+
+        $this->postJson('/api/attendances', [
+            'student_id' => $this->student->id,
+            'class_schedule_id' => $otherMorning->id,
+            'branch_id' => $otherBranch->id,
+            'attendance_date' => '2026-07-30',
+        ])->assertStatus(422)
+            ->assertJsonValidationErrors(['student_id']);
+
+        $this->assertDatabaseCount('attendances', 1);
+    }
+
+    public function test_student_can_attend_non_overlapping_later_schedule_same_day(): void
+    {
+        Attendance::query()->create([
+            'student_id' => $this->student->id,
+            'class_schedule_id' => $this->morning->id,
+            'branch_id' => $this->branch->id,
+            'attendance_date' => '2026-07-30',
+        ]);
+
+        Carbon::setTestNow(Carbon::parse('2026-07-30 18:30:00', BusinessClock::TIMEZONE));
 
         $this->postJson('/api/attendances', [
             'student_id' => $this->student->id,
@@ -115,11 +206,12 @@ class AttendanceApiTest extends TestCase
             'attendance_date' => '2026-07-30',
         ])->assertCreated();
 
-        $this->postJson('/api/attendances', [
+        Attendance::query()->create([
             'student_id' => $this->student->id,
             'class_schedule_id' => $this->evening->id,
+            'branch_id' => $this->branch->id,
             'attendance_date' => '2026-07-30',
-        ])->assertCreated();
+        ]);
 
         $response = $this->getJson('/api/attendances?date=2026-07-30&branch_id='.$this->branch->id.'&class_schedule_id='.$this->morning->id);
 
