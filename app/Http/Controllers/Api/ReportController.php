@@ -66,6 +66,8 @@ class ReportController extends Controller
             ['Mensualidades', $report['income']['membership_payments']],
             ['Ventas', $report['income']['sales']],
             ['Ingresos totales', $report['income']['total']],
+            ['Gastos mercancía', $report['expenses']['merchandise']],
+            ['Gastos operativos', $report['expenses']['operational']],
             ['Gastos', $report['expenses']['total']],
             ['Balance', $report['balance']],
         ], null, 'A1');
@@ -73,7 +75,7 @@ class ReportController extends Controller
         $byMonth = $spreadsheet->createSheet();
         $byMonth->setTitle('Por mes');
         $byMonth->fromArray([
-            ['Año', 'Mes', 'Mensualidades', 'Ventas', 'Ingresos', 'Gastos', 'Balance'],
+            ['Año', 'Mes', 'Mensualidades', 'Ventas', 'Ingresos', 'Mercancía', 'Operativos', 'Gastos', 'Balance'],
         ], null, 'A1');
 
         $row = 2;
@@ -85,6 +87,8 @@ class ReportController extends Controller
                     $month['income']['membership_payments'],
                     $month['income']['sales'],
                     $month['income']['total'],
+                    $month['expenses']['merchandise'],
+                    $month['expenses']['operational'],
                     $month['expenses']['total'],
                     $month['balance'],
                 ],
@@ -151,6 +155,8 @@ class ReportController extends Controller
         $membershipIncome = array_sum(array_column(array_column($months, 'income'), 'membership_payments'));
         $salesIncome = array_sum(array_column(array_column($months, 'income'), 'sales'));
         $expensesTotal = array_sum(array_map(fn (array $m) => $m['expenses']['total'], $months));
+        $merchandiseTotal = array_sum(array_map(fn (array $m) => $m['expenses']['merchandise'], $months));
+        $operationalTotal = array_sum(array_map(fn (array $m) => $m['expenses']['operational'], $months));
         $incomeTotal = $membershipIncome + $salesIncome;
         $balance = $incomeTotal - $expensesTotal;
 
@@ -180,6 +186,8 @@ class ReportController extends Controller
             ],
             'expenses' => [
                 'total' => round($expensesTotal, 2),
+                'merchandise' => round($merchandiseTotal, 2),
+                'operational' => round($operationalTotal, 2),
             ],
             'balance' => round($balance, 2),
             'months' => $months,
@@ -265,16 +273,24 @@ class ReportController extends Controller
             });
 
         $expenses = [];
+        $merchandise = [];
+        $operational = [];
         Expense::query()
             ->whereDate('expense_date', '>=', $from)
             ->whereDate('expense_date', '<=', $to)
-            ->get(['expense_date', 'amount'])
-            ->each(function (Expense $row) use (&$expenses) {
+            ->get(['expense_date', 'amount', 'source'])
+            ->each(function (Expense $row) use (&$expenses, &$merchandise, &$operational) {
                 $key = $row->expense_date?->format('Y-m');
                 if ($key === null) {
                     return;
                 }
-                $expenses[$key] = ($expenses[$key] ?? 0) + (float) $row->amount;
+                $amount = (float) $row->amount;
+                $expenses[$key] = ($expenses[$key] ?? 0) + $amount;
+                if ($row->source === Expense::SOURCE_MERCHANDISE) {
+                    $merchandise[$key] = ($merchandise[$key] ?? 0) + $amount;
+                } else {
+                    $operational[$key] = ($operational[$key] ?? 0) + $amount;
+                }
             });
 
         $months = [];
@@ -289,6 +305,8 @@ class ReportController extends Controller
             $membership = (float) ($memberships[$key] ?? 0);
             $sale = (float) ($sales[$key] ?? 0);
             $expense = (float) ($expenses[$key] ?? 0);
+            $merch = (float) ($merchandise[$key] ?? 0);
+            $op = (float) ($operational[$key] ?? 0);
             $incomeTotal = $membership + $sale;
 
             $months[] = [
@@ -301,6 +319,8 @@ class ReportController extends Controller
                 ],
                 'expenses' => [
                     'total' => round($expense, 2),
+                    'merchandise' => round($merch, 2),
+                    'operational' => round($op, 2),
                 ],
                 'balance' => round($incomeTotal - $expense, 2),
             ];

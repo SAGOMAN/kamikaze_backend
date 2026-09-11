@@ -4,33 +4,31 @@ namespace App\Models;
 
 use App\Models\Concerns\Auditable;
 use Illuminate\Database\Eloquent\Model;
-use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\SoftDeletes;
 
-class Product extends Model
+class CatalogItem extends Model
 {
     use Auditable, SoftDeletes;
 
     protected $fillable = [
+        'catalog_id',
         'name',
-        'sku',
-        'description',
-        'unit_price',
-        'last_cost',
+        'code',
+        'sort_order',
         'is_active',
     ];
 
     protected function casts(): array
     {
         return [
-            'unit_price' => 'decimal:2',
-            'last_cost' => 'decimal:2',
             'is_active' => 'boolean',
+            'sort_order' => 'integer',
         ];
     }
 
-    public function stocks(): HasMany
+    public function catalog(): BelongsTo
     {
-        return $this->hasMany(ProductStock::class);
+        return $this->belongsTo(Catalog::class);
     }
 }

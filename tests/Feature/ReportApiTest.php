@@ -104,6 +104,8 @@ class ReportApiTest extends TestCase
             ->assertJsonPath('income.sales', 2100)
             ->assertJsonPath('income.membership_payments', 4200)
             ->assertJsonPath('expenses.total', 1050)
+            ->assertJsonPath('expenses.operational', 1050)
+            ->assertJsonPath('expenses.merchandise', 0)
             ->assertJsonPath('balance', 5250);
 
         $tops = $response->json('tops');
@@ -168,6 +170,8 @@ class ReportApiTest extends TestCase
             ->assertJsonPath('income.sales', 200)
             ->assertJsonPath('income.total', 700)
             ->assertJsonPath('expenses.total', 100)
+            ->assertJsonPath('expenses.operational', 100)
+            ->assertJsonPath('expenses.merchandise', 0)
             ->assertJsonPath('balance', 600)
             ->assertJsonPath('tops', null);
 
@@ -227,5 +231,39 @@ class ReportApiTest extends TestCase
         $this->getJson('/api/reports/period?period=quarter&year=2026')
             ->assertStatus(422)
             ->assertJsonValidationErrors(['quarter']);
+    }
+
+    public function test_monthly_report_splits_merchandise_and_operational_expenses(): void
+    {
+        Expense::query()->create([
+            'category' => 'Renta',
+            'amount' => 200,
+            'expense_date' => '2026-09-01',
+            'source' => Expense::SOURCE_OPERATIONAL,
+            'branch_id' => $this->branch->id,
+        ]);
+
+        Expense::query()->create([
+            'category' => Expense::CATEGORY_MERCHANDISE,
+            'amount' => 80,
+            'expense_date' => '2026-09-05',
+            'source' => Expense::SOURCE_MERCHANDISE,
+            'branch_id' => $this->branch->id,
+        ]);
+
+        Sale::query()->create([
+            'branch_id' => $this->branch->id,
+            'sale_date' => '2026-09-10',
+            'total' => 500,
+        ]);
+
+        $response = $this->getJson('/api/reports/monthly?year=2026&month=9');
+
+        $response->assertOk()
+            ->assertJsonPath('income.sales', 500)
+            ->assertJsonPath('expenses.operational', 200)
+            ->assertJsonPath('expenses.merchandise', 80)
+            ->assertJsonPath('expenses.total', 280)
+            ->assertJsonPath('balance', 220);
     }
 }
