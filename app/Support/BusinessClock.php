@@ -6,7 +6,8 @@ use Carbon\Carbon;
 
 final class BusinessClock
 {
-    public const TIMEZONE = 'America/Mexico_City';
+    /** Zona de negocio; debe coincidir con config('app.timezone'). */
+    public const TIMEZONE = 'America/Guayaquil';
 
     public static function now(): Carbon
     {

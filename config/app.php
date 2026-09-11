@@ -61,11 +61,12 @@ return [
     |
     | Here you may specify the default timezone for your application, which
     | will be used by the PHP date and date-time functions. The timezone
-    | is set to "UTC" by default as it is suitable for most use cases.
+    | is America/Guayaquil (UTC-5, sin horario de verano) para alinear
+    | timestamps de Eloquent con el reloj local del negocio.
     |
     */
 
-    'timezone' => 'UTC',
+    'timezone' => 'America/Guayaquil',
 
     /*
     |--------------------------------------------------------------------------
