@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Api\Concerns\RespondsWithPaginatedList;
 use App\Http\Controllers\Controller;
+use App\Models\Catalog;
 use App\Models\MembershipPayment;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -63,7 +64,7 @@ class MembershipPaymentController extends Controller
             'amount' => ['required', 'numeric', 'min:0'],
             'payment_date' => ['required', 'date'],
             'period_month' => ['required', 'regex:/^\d{4}-\d{2}$/'],
-            'payment_method' => ['nullable', 'string', 'max:50'],
+            'payment_method' => ['required', 'string', 'max:100', Catalog::itemNameRule(Catalog::PAYMENT_METHODS)],
             'notes' => ['nullable', 'string'],
         ]);
 
@@ -84,7 +85,12 @@ class MembershipPaymentController extends Controller
             'amount' => ['sometimes', 'numeric', 'min:0'],
             'payment_date' => ['sometimes', 'date'],
             'period_month' => ['sometimes', 'regex:/^\d{4}-\d{2}$/'],
-            'payment_method' => ['nullable', 'string', 'max:50'],
+            'payment_method' => [
+                'nullable',
+                'string',
+                'max:100',
+                Catalog::itemNameRule(Catalog::PAYMENT_METHODS, $membershipPayment->payment_method),
+            ],
             'notes' => ['nullable', 'string'],
         ]);
 

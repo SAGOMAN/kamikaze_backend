@@ -86,7 +86,7 @@ class CatalogController extends Controller
     {
         if ($catalog->isReserved()) {
             throw ValidationException::withMessages([
-                'code' => ['No se puede eliminar el catálogo de categorías de gasto.'],
+                'code' => ['No se puede eliminar un catálogo reservado.'],
             ]);
         }
 

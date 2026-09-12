@@ -13,5 +13,6 @@ class CatalogSeeder extends Seeder
         $adminId = User::query()->where('email', 'admin@hanuman.style')->value('id');
 
         Catalog::ensureExpenseCategories($adminId);
+        Catalog::ensurePaymentMethods($adminId);
     }
 }

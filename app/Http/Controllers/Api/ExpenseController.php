@@ -12,7 +12,6 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
-use Illuminate\Validation\Rules\Exists;
 use Illuminate\Validation\ValidationException;
 
 class ExpenseController extends Controller
@@ -60,7 +59,7 @@ class ExpenseController extends Controller
     public function store(Request $request): JsonResponse
     {
         $data = $request->validate([
-            'category' => ['required', 'string', 'max:100', $this->expenseCategoryRule()],
+            'category' => ['required', 'string', 'max:100', Catalog::itemNameRule(Catalog::EXPENSE_CATEGORIES)],
             'description' => ['nullable', 'string', 'max:255'],
             'amount' => ['required', 'numeric', 'min:0'],
             'expense_date' => ['required', 'date'],
@@ -98,7 +97,7 @@ class ExpenseController extends Controller
             ]);
         } else {
             $data = $request->validate([
-                'category' => ['sometimes', 'string', 'max:100', $this->expenseCategoryRule($expense->category)],
+                'category' => ['sometimes', 'string', 'max:100', Catalog::itemNameRule(Catalog::EXPENSE_CATEGORIES, $expense->category)],
                 'description' => ['nullable', 'string', 'max:255'],
                 'amount' => ['sometimes', 'numeric', 'min:0'],
                 'expense_date' => ['sometimes', 'date'],
@@ -153,22 +152,5 @@ class ExpenseController extends Controller
         });
 
         return response()->json(null, 204);
-    }
-
-    private function expenseCategoryRule(?string $current = null): Exists
-    {
-        return Rule::exists('catalog_items', 'name')->where(function ($query) use ($current) {
-            $query->whereNull('deleted_at')
-                ->whereIn(
-                    'catalog_id',
-                    Catalog::query()->where('code', Catalog::EXPENSE_CATEGORIES)->select('id')
-                )
-                ->where(function ($inner) use ($current) {
-                    $inner->where('is_active', true);
-                    if ($current) {
-                        $inner->orWhere('name', $current);
-                    }
-                });
-        });
     }
 }

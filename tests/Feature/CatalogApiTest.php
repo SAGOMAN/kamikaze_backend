@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Models\Catalog;
+use App\Models\Student;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Laravel\Sanctum\Sanctum;
@@ -45,8 +46,8 @@ class CatalogApiTest extends TestCase
     public function test_can_create_catalog_and_items(): void
     {
         $catalogId = $this->postJson('/api/catalogs', [
-            'code' => 'payment_methods',
-            'name' => 'Métodos de pago',
+            'code' => 'demo_list',
+            'name' => 'Lista de prueba',
         ])->assertCreated()->json('id');
 
         $this->postJson("/api/catalogs/{$catalogId}/items", [
@@ -130,5 +131,77 @@ class CatalogApiTest extends TestCase
             'category' => 'Comida',
             'notes' => 'Ticket 1',
         ])->assertOk()->assertJsonPath('notes', 'Ticket 1');
+    }
+
+    public function test_seeder_creates_payment_methods(): void
+    {
+        $catalog = Catalog::ensurePaymentMethods();
+
+        $this->assertSame(Catalog::PAYMENT_METHODS, $catalog->code);
+        $this->assertEqualsCanonicalizing(
+            ['Efectivo', 'Transferencia', 'De Una!'],
+            $catalog->items->pluck('name')->all()
+        );
+    }
+
+    public function test_cannot_delete_reserved_payment_methods_catalog(): void
+    {
+        $catalog = Catalog::ensurePaymentMethods();
+
+        $this->deleteJson("/api/catalogs/{$catalog->id}")
+            ->assertStatus(422)
+            ->assertJsonValidationErrors(['code']);
+    }
+
+    public function test_membership_payment_store_requires_catalog_method(): void
+    {
+        Catalog::ensurePaymentMethods();
+        $studentId = Student::query()->create([
+            'first_name' => 'Ana',
+            'last_name' => 'Pérez',
+            'is_active' => true,
+        ])->id;
+
+        $this->postJson('/api/membership-payments', [
+            'student_id' => $studentId,
+            'amount' => 500,
+            'payment_date' => '2026-09-12',
+            'period_month' => '2026-09',
+            'payment_method' => 'Cheque',
+        ])->assertStatus(422)->assertJsonValidationErrors(['payment_method']);
+
+        $this->postJson('/api/membership-payments', [
+            'student_id' => $studentId,
+            'amount' => 500,
+            'payment_date' => '2026-09-12',
+            'period_month' => '2026-09',
+            'payment_method' => 'De Una!',
+        ])->assertCreated()->assertJsonPath('payment_method', 'De Una!');
+    }
+
+    public function test_membership_payment_update_keeps_historical_inactive_method(): void
+    {
+        $catalog = Catalog::ensurePaymentMethods();
+        $item = $catalog->items()->where('code', 'efectivo')->firstOrFail();
+        $studentId = Student::query()->create([
+            'first_name' => 'Luis',
+            'last_name' => 'Gómez',
+            'is_active' => true,
+        ])->id;
+
+        $paymentId = $this->postJson('/api/membership-payments', [
+            'student_id' => $studentId,
+            'amount' => 400,
+            'payment_date' => '2026-09-12',
+            'period_month' => '2026-09',
+            'payment_method' => 'Efectivo',
+        ])->assertCreated()->json('id');
+
+        $item->update(['is_active' => false]);
+
+        $this->putJson("/api/membership-payments/{$paymentId}", [
+            'payment_method' => 'Efectivo',
+            'notes' => 'Histórico',
+        ])->assertOk()->assertJsonPath('notes', 'Histórico');
     }
 }
