@@ -3,13 +3,14 @@
 namespace App\Models;
 
 use App\Models\Concerns\Auditable;
+use App\Models\Concerns\SerializesDatesInAppTimezone;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\SoftDeletes;
 
 class Expense extends Model
 {
-    use Auditable, SoftDeletes;
+    use Auditable, SerializesDatesInAppTimezone, SoftDeletes;
 
     public const SOURCE_OPERATIONAL = 'operational';
 

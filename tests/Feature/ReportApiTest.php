@@ -13,6 +13,8 @@ use App\Models\Student;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Laravel\Sanctum\Sanctum;
+use PhpOffice\PhpSpreadsheet\IOFactory;
+use PhpOffice\PhpSpreadsheet\Spreadsheet;
 use Tests\TestCase;
 
 class ReportApiTest extends TestCase
@@ -265,5 +267,190 @@ class ReportApiTest extends TestCase
             ->assertJsonPath('expenses.merchandise', 80)
             ->assertJsonPath('expenses.total', 280)
             ->assertJsonPath('balance', 220);
+    }
+
+    public function test_period_filters_by_branch_ids(): void
+    {
+        $norte = Branch::query()->create([
+            'name' => 'Norte',
+            'is_active' => true,
+        ]);
+
+        $student = Student::query()->create([
+            'first_name' => 'Ana',
+            'last_name' => 'Pérez',
+            'is_active' => true,
+        ]);
+
+        MembershipPayment::query()->create([
+            'student_id' => $student->id,
+            'amount' => 400,
+            'payment_date' => '2026-08-02',
+            'period_month' => '2026-08',
+            'payment_method' => 'efectivo',
+        ]);
+        Sale::query()->create([
+            'branch_id' => $this->branch->id,
+            'sale_date' => '2026-08-05',
+            'total' => 150,
+        ]);
+        Sale::query()->create([
+            'branch_id' => $norte->id,
+            'sale_date' => '2026-08-06',
+            'total' => 80,
+        ]);
+        Expense::query()->create([
+            'category' => 'Renta',
+            'amount' => 50,
+            'expense_date' => '2026-08-07',
+            'branch_id' => $this->branch->id,
+        ]);
+        Expense::query()->create([
+            'category' => 'Luz',
+            'amount' => 30,
+            'expense_date' => '2026-08-08',
+            'branch_id' => $norte->id,
+        ]);
+
+        $all = $this->getJson('/api/reports/period?period=month&year=2026&month=8');
+        $all->assertOk()
+            ->assertJsonPath('income.membership_payments', 400)
+            ->assertJsonPath('income.sales', 230)
+            ->assertJsonPath('expenses.total', 80)
+            ->assertJsonPath('balance', 550);
+
+        $this->assertCount(3, $all->json('by_branch'));
+        $this->assertSame('Sin sucursal', $all->json('by_branch.2.name'));
+
+        $centroOnly = $this->getJson('/api/reports/period?'.http_build_query([
+            'period' => 'month',
+            'year' => 2026,
+            'month' => 8,
+            'branch_ids' => [$this->branch->id],
+        ]));
+        $centroOnly->assertOk()
+            ->assertJsonPath('income.membership_payments', 0)
+            ->assertJsonPath('income.sales', 150)
+            ->assertJsonPath('expenses.total', 50)
+            ->assertJsonPath('balance', 100)
+            ->assertJsonPath('tops.membership_payments', []);
+
+        $this->assertCount(1, $centroOnly->json('by_branch'));
+        $this->assertSame('Centro', $centroOnly->json('by_branch.0.name'));
+
+        $both = $this->getJson('/api/reports/period?'.http_build_query([
+            'period' => 'month',
+            'year' => 2026,
+            'month' => 8,
+            'branch_ids' => [$this->branch->id, $norte->id],
+        ]));
+        $both->assertOk()
+            ->assertJsonPath('income.membership_payments', 400)
+            ->assertJsonPath('income.sales', 230)
+            ->assertJsonPath('expenses.total', 80);
+        $this->assertGreaterThanOrEqual(2, count($both->json('by_branch')));
+    }
+
+    public function test_period_rejects_unknown_branch_id(): void
+    {
+        $this->getJson('/api/reports/period?period=month&year=2026&month=8&branch_ids[]=999')
+            ->assertStatus(422)
+            ->assertJsonValidationErrors(['branch_ids.0']);
+    }
+
+    public function test_period_export_includes_movement_rows_and_branch_breakdown(): void
+    {
+        $norte = Branch::query()->create([
+            'name' => 'Norte',
+            'is_active' => true,
+        ]);
+        $student = Student::query()->create([
+            'first_name' => 'Luis',
+            'last_name' => 'García',
+            'is_active' => true,
+        ]);
+        MembershipPayment::query()->create([
+            'student_id' => $student->id,
+            'amount' => 300,
+            'payment_date' => '2026-01-04',
+            'period_month' => '2026-01',
+            'payment_method' => 'efectivo',
+        ]);
+        Sale::query()->create([
+            'branch_id' => $this->branch->id,
+            'sale_date' => '2026-01-10',
+            'total' => 100,
+            'notes' => 'Guantes',
+        ]);
+        Sale::query()->create([
+            'branch_id' => $norte->id,
+            'sale_date' => '2026-01-12',
+            'total' => 40,
+        ]);
+        Expense::query()->create([
+            'category' => 'Renta',
+            'description' => 'Enero',
+            'amount' => 25,
+            'expense_date' => '2026-01-15',
+            'branch_id' => $this->branch->id,
+        ]);
+
+        $response = $this->get('/api/reports/period/export?period=year&year=2026');
+        $response->assertOk();
+
+        $spreadsheet = $this->spreadsheetFromResponse($response->streamedContent());
+        $this->assertSame(['Resumen', 'Movimientos', 'Por mes'], $spreadsheet->getSheetNames());
+
+        $summary = $spreadsheet->getSheetByName('Resumen');
+        $this->assertSame('Sucursales', $summary->getCell('A5')->getValue());
+        $this->assertSame('Todas', $summary->getCell('B5')->getValue());
+        $this->assertSame('Desglose por sucursal', $summary->getCell('A16')->getValue());
+        $this->assertSame('Centro', $summary->getCell('A18')->getValue());
+        $this->assertSame('Norte', $summary->getCell('A19')->getValue());
+        $this->assertSame('Sin sucursal', $summary->getCell('A20')->getValue());
+        $this->assertSame('Total', $summary->getCell('A21')->getValue());
+
+        $movements = $spreadsheet->getSheetByName('Movimientos');
+        $this->assertSame('Fecha', $movements->getCell('A1')->getValue());
+        $this->assertSame('Sucursal', $movements->getCell('B1')->getValue());
+        $dates = [
+            (string) $movements->getCell('A2')->getValue(),
+            (string) $movements->getCell('A3')->getValue(),
+            (string) $movements->getCell('A4')->getValue(),
+            (string) $movements->getCell('A5')->getValue(),
+        ];
+        $this->assertContains('2026-01-04', $dates);
+        $this->assertContains('2026-01-10', $dates);
+        $this->assertContains('2026-01-12', $dates);
+        $this->assertContains('2026-01-15', $dates);
+
+        $types = [
+            (string) $movements->getCell('C2')->getValue(),
+            (string) $movements->getCell('C3')->getValue(),
+            (string) $movements->getCell('C4')->getValue(),
+            (string) $movements->getCell('C5')->getValue(),
+        ];
+        $this->assertContains('Ganancia', $types);
+        $this->assertContains('Gasto', $types);
+
+        $filtered = $this->get('/api/reports/period/export?'.http_build_query([
+            'period' => 'year',
+            'year' => 2026,
+            'branch_ids' => [$norte->id],
+        ]));
+        $filteredSheet = $this->spreadsheetFromResponse($filtered->streamedContent())->getSheetByName('Movimientos');
+        $this->assertSame('2026-01-12', (string) $filteredSheet->getCell('A2')->getValue());
+        $this->assertSame('Norte', (string) $filteredSheet->getCell('B2')->getValue());
+        $this->assertSame('', (string) $filteredSheet->getCell('A3')->getValue());
+    }
+
+    private function spreadsheetFromResponse(string $content): Spreadsheet
+    {
+        $path = tempnam(sys_get_temp_dir(), 'xlsx');
+        file_put_contents($path, $content);
+        $spreadsheet = IOFactory::load($path);
+        unlink($path);
+
+        return $spreadsheet;
     }
 }

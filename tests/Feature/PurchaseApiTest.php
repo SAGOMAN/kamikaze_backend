@@ -195,7 +195,8 @@ class PurchaseApiTest extends TestCase
 
         $response->assertCreated()
             ->assertJsonPath('source', Expense::SOURCE_OPERATIONAL)
-            ->assertJsonPath('product_id', null);
+            ->assertJsonPath('product_id', null)
+            ->assertJsonPath('expense_date', '2026-09-01 00:00:00');
     }
 
     public function test_purchase_adds_to_existing_stock(): void
