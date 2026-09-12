@@ -91,14 +91,56 @@ class AttendanceApiTest extends TestCase
             ->assertJsonValidationErrors(['class_schedule_id']);
     }
 
-    public function test_store_rejects_date_other_than_today(): void
+    public function test_store_rejects_future_date(): void
     {
         $this->postJson('/api/attendances', [
             'student_id' => $this->student->id,
             'class_schedule_id' => $this->morning->id,
             'attendance_date' => '2026-07-31',
         ])->assertStatus(422)
-            ->assertJsonValidationErrors(['attendance_date']);
+            ->assertJsonValidationErrors(['attendance_date'])
+            ->assertJsonFragment(['No se puede marcar asistencia de un día futuro.']);
+    }
+
+    public function test_store_allows_past_date_matching_weekday(): void
+    {
+        $this->postJson('/api/attendances', [
+            'student_id' => $this->student->id,
+            'class_schedule_id' => $this->evening->id,
+            'branch_id' => $this->branch->id,
+            'attendance_date' => '2026-07-23',
+        ])->assertCreated();
+
+        $this->assertDatabaseCount('attendances', 1);
+        $this->assertTrue(
+            Attendance::query()
+                ->where('student_id', $this->student->id)
+                ->where('class_schedule_id', $this->evening->id)
+                ->whereDate('attendance_date', '2026-07-23')
+                ->exists()
+        );
+    }
+
+    public function test_index_filters_by_date_range(): void
+    {
+        Attendance::query()->create([
+            'student_id' => $this->student->id,
+            'class_schedule_id' => $this->morning->id,
+            'branch_id' => $this->branch->id,
+            'attendance_date' => '2026-07-23',
+        ]);
+        Attendance::query()->create([
+            'student_id' => $this->student->id,
+            'class_schedule_id' => $this->evening->id,
+            'branch_id' => $this->branch->id,
+            'attendance_date' => '2026-07-30',
+        ]);
+
+        $response = $this->getJson('/api/attendances?from=2026-07-20&to=2026-07-25&branch_id='.$this->branch->id);
+
+        $response->assertOk();
+        $this->assertCount(1, $response->json());
+        $this->assertSame('2026-07-23', substr((string) $response->json('0.attendance_date'), 0, 10));
     }
 
     public function test_store_rejects_schedule_for_wrong_weekday(): void

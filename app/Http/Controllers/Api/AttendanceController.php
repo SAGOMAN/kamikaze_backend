@@ -26,6 +26,13 @@ class AttendanceController extends Controller
 
         if ($request->filled('date')) {
             $query->whereDate('attendance_date', $request->query('date'));
+        } else {
+            if ($request->filled('from')) {
+                $query->whereDate('attendance_date', '>=', $request->query('from'));
+            }
+            if ($request->filled('to')) {
+                $query->whereDate('attendance_date', '<=', $request->query('to'));
+            }
         }
 
         if ($request->filled('branch_id')) {
@@ -119,9 +126,11 @@ class AttendanceController extends Controller
      */
     private function assertCanMark(array $data, ClassSchedule $schedule, string $attendanceDate): void
     {
-        if ($attendanceDate !== BusinessClock::todayDate()) {
+        $today = BusinessClock::todayDate();
+
+        if ($attendanceDate > $today) {
             throw ValidationException::withMessages([
-                'attendance_date' => ['Solo se puede marcar asistencia en el día de hoy.'],
+                'attendance_date' => ['No se puede marcar asistencia de un día futuro.'],
             ]);
         }
 
@@ -137,7 +146,7 @@ class AttendanceController extends Controller
             ]);
         }
 
-        if (! $schedule->occursAt(BusinessClock::now())) {
+        if ($attendanceDate === $today && ! $schedule->occursAt(BusinessClock::now())) {
             throw ValidationException::withMessages([
                 'class_schedule_id' => ['El horario no corresponde a la clase en curso.'],
             ]);
