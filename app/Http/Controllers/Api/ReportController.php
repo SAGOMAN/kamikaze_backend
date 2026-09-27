@@ -179,6 +179,7 @@ class ReportController extends Controller
             'balance' => $totals['balance'],
             'months' => $totals['months'],
             'by_branch' => $totals['by_branch'],
+            'unassigned' => $totals['unassigned'],
             'tops' => $tops,
             'branch_ids' => $branchIds,
             'include_unassigned' => $includeUnassigned,
@@ -263,7 +264,7 @@ class ReportController extends Controller
 
     /**
      * @param  list<int>|null  $branchIds
-     * @return array{income: array<string, float>, expenses: array<string, float>, balance: float, months: list<array<string, mixed>>, by_branch: list<array<string, mixed>>}
+     * @return array{income: array<string, float>, expenses: array<string, float>, balance: float, months: list<array<string, mixed>>, by_branch: list<array<string, mixed>>, unassigned: array<string, mixed>}
      */
     private function periodTotals(string $from, string $to, ?array $branchIds, bool $includeUnassigned): array
     {
@@ -341,9 +342,8 @@ class ReportController extends Controller
             );
         }
 
-        $unassigned = $this->finalizeBucket($branchBuckets['none']);
-        $hasUnassigned = $unassigned['income']['total'] != 0.0 || $unassigned['expenses']['total'] != 0.0;
-        if ($includeUnassigned && $hasUnassigned) {
+        $unassigned = $this->unassignedBucket($from, $to);
+        if ($includeUnassigned) {
             $byBranch[] = array_merge(['id' => null, 'name' => 'Sin sucursal'], $unassigned);
         }
 
@@ -368,7 +368,38 @@ class ReportController extends Controller
             'balance' => round($incomeTotal - $expensesTotal, 2),
             'months' => $months,
             'by_branch' => $byBranch,
+            'unassigned' => $unassigned,
         ];
+    }
+
+    /**
+     * Mensualidades y gastos sin sucursal del período. Siempre se calcula, aunque el filtro de sucursales no los sume al consolidado.
+     *
+     * @return array{income: array{membership_payments: float, sales: float, total: float}, expenses: array{total: float, merchandise: float, operational: float}, balance: float}
+     */
+    private function unassignedBucket(string $from, string $to): array
+    {
+        $bucket = $this->emptyBucket();
+
+        MembershipPayment::query()
+            ->whereDate('payment_date', '>=', $from)
+            ->whereDate('payment_date', '<=', $to)
+            ->get(['amount'])
+            ->each(function (MembershipPayment $row) use (&$bucket) {
+                $bucket['income']['membership_payments'] += (float) $row->amount;
+            });
+
+        Expense::query()
+            ->whereNull('branch_id')
+            ->whereDate('expense_date', '>=', $from)
+            ->whereDate('expense_date', '<=', $to)
+            ->get(['amount', 'source'])
+            ->each(function (Expense $row) use (&$bucket) {
+                $kind = $row->source === Expense::SOURCE_MERCHANDISE ? 'merchandise' : 'operational';
+                $bucket['expenses'][$kind] += (float) $row->amount;
+            });
+
+        return $this->finalizeBucket($bucket);
     }
 
     /**

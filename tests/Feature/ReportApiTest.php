@@ -341,6 +341,7 @@ class ReportApiTest extends TestCase
 
         $this->assertCount(3, $all->json('by_branch'));
         $this->assertSame('Sin sucursal', $all->json('by_branch.2.name'));
+        $this->assertSame(400, $all->json('unassigned.income.membership_payments'));
 
         $centroOnly = $this->getJson('/api/reports/period?'.http_build_query([
             'period' => 'month',
@@ -357,6 +358,15 @@ class ReportApiTest extends TestCase
 
         $this->assertCount(1, $centroOnly->json('by_branch'));
         $this->assertSame('Centro', $centroOnly->json('by_branch.0.name'));
+        $this->assertSame(400, $centroOnly->json('unassigned.income.membership_payments'));
+        $this->assertSame(0, $centroOnly->json('unassigned.income.sales'));
+
+        $empty = $this->getJson('/api/reports/period?period=month&year=2026&month=1');
+        $empty->assertOk();
+        $names = collect($empty->json('by_branch'))->pluck('name')->all();
+        $this->assertContains('Sin sucursal', $names);
+        $this->assertSame(0, $empty->json('unassigned.income.total'));
+        $this->assertSame(0, $empty->json('unassigned.expenses.total'));
 
         $both = $this->getJson('/api/reports/period?'.http_build_query([
             'period' => 'month',
