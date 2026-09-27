@@ -747,7 +747,7 @@ class ReportController extends Controller
     private function topSales(string $from, string $to, ?array $branchIds): array
     {
         $query = Sale::query()
-            ->with('branch:id,name')
+            ->with(['branch:id,name', 'items.product:id,name'])
             ->whereDate('sale_date', '>=', $from)
             ->whereDate('sale_date', '<=', $to);
         $this->constrainByBranch($query, $branchIds);
@@ -765,6 +765,17 @@ class ReportController extends Controller
                 'branch' => $sale->branch
                     ? ['id' => $sale->branch->id, 'name' => $sale->branch->name]
                     : null,
+                'items' => $sale->items
+                    ->map(fn ($item) => [
+                        'id' => $item->id,
+                        'product_id' => $item->product_id,
+                        'quantity' => $item->quantity,
+                        'product' => $item->product
+                            ? ['id' => $item->product->id, 'name' => $item->product->name]
+                            : null,
+                    ])
+                    ->values()
+                    ->all(),
             ])
             ->values()
             ->all();

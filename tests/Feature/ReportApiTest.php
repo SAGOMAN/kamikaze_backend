@@ -8,7 +8,9 @@ use App\Models\ClassSchedule;
 use App\Models\Expense;
 use App\Models\Instructor;
 use App\Models\MembershipPayment;
+use App\Models\Product;
 use App\Models\Sale;
+use App\Models\SaleItem;
 use App\Models\Student;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -189,10 +191,25 @@ class ReportApiTest extends TestCase
 
     public function test_period_month_includes_tops(): void
     {
-        Sale::query()->create([
+        $product = Product::query()->create([
+            'name' => 'Guantes',
+            'sku' => 'GNT-1',
+            'unit_price' => 150,
+            'is_active' => true,
+        ]);
+
+        $sale = Sale::query()->create([
             'branch_id' => $this->branch->id,
             'sale_date' => '2026-08-05',
             'total' => 150,
+        ]);
+
+        SaleItem::query()->create([
+            'sale_id' => $sale->id,
+            'product_id' => $product->id,
+            'quantity' => 2,
+            'unit_price' => 75,
+            'subtotal' => 150,
         ]);
 
         $response = $this->getJson('/api/reports/period?period=month&year=2026&month=8');
@@ -200,7 +217,10 @@ class ReportApiTest extends TestCase
         $response->assertOk()
             ->assertJsonPath('period', 'month')
             ->assertJsonPath('label', '08/2026')
-            ->assertJsonCount(1, 'months');
+            ->assertJsonCount(1, 'months')
+            ->assertJsonPath('tops.sales.0.sale_date', '2026-08-05')
+            ->assertJsonPath('tops.sales.0.items.0.product.name', 'Guantes')
+            ->assertJsonPath('tops.sales.0.items.0.quantity', 2);
 
         $this->assertIsArray($response->json('tops'));
         $this->assertCount(1, $response->json('tops.sales'));
