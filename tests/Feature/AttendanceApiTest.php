@@ -344,6 +344,203 @@ class AttendanceApiTest extends TestCase
         $this->assertStringNotContainsString('"exception"', $body);
     }
 
+    public function test_sync_registers_multiple_students_in_one_request(): void
+    {
+        $other = Student::query()->create([
+            'first_name' => 'Luis',
+            'last_name' => 'Gómez',
+            'is_active' => true,
+        ]);
+
+        $response = $this->postJson('/api/attendances/sync', [
+            'class_schedule_id' => $this->morning->id,
+            'branch_id' => $this->branch->id,
+            'attendance_date' => '2026-07-30',
+            'student_ids' => [$other->id, $this->student->id],
+        ])->assertOk();
+
+        $this->assertCount(2, $response->json());
+        $this->assertDatabaseCount('attendances', 2);
+        $this->assertDatabaseHas('attendances', [
+            'student_id' => $this->student->id,
+            'class_schedule_id' => $this->morning->id,
+        ]);
+        $this->assertDatabaseHas('attendances', [
+            'student_id' => $other->id,
+            'class_schedule_id' => $this->morning->id,
+        ]);
+    }
+
+    public function test_sync_replaces_roster_and_soft_deletes_removed_students(): void
+    {
+        $kept = $this->student;
+        $removed = Student::query()->create([
+            'first_name' => 'Luis',
+            'last_name' => 'Gómez',
+            'is_active' => true,
+        ]);
+        $added = Student::query()->create([
+            'first_name' => 'Mara',
+            'last_name' => 'López',
+            'is_active' => true,
+        ]);
+
+        $removedAttendance = Attendance::query()->create([
+            'student_id' => $removed->id,
+            'class_schedule_id' => $this->morning->id,
+            'branch_id' => $this->branch->id,
+            'attendance_date' => '2026-07-30',
+        ]);
+        Attendance::query()->create([
+            'student_id' => $kept->id,
+            'class_schedule_id' => $this->morning->id,
+            'branch_id' => $this->branch->id,
+            'attendance_date' => '2026-07-30',
+        ]);
+
+        $this->postJson('/api/attendances/sync', [
+            'class_schedule_id' => $this->morning->id,
+            'attendance_date' => '2026-07-30',
+            'student_ids' => [$kept->id, $added->id],
+        ])->assertOk();
+
+        $this->assertDatabaseHas('attendances', [
+            'student_id' => $kept->id,
+            'class_schedule_id' => $this->morning->id,
+            'deleted_at' => null,
+        ]);
+        $this->assertDatabaseHas('attendances', [
+            'student_id' => $added->id,
+            'class_schedule_id' => $this->morning->id,
+            'deleted_at' => null,
+        ]);
+        $this->assertSoftDeleted('attendances', ['id' => $removedAttendance->id]);
+    }
+
+    public function test_sync_empty_list_clears_schedule_day(): void
+    {
+        Attendance::query()->create([
+            'student_id' => $this->student->id,
+            'class_schedule_id' => $this->morning->id,
+            'branch_id' => $this->branch->id,
+            'attendance_date' => '2026-07-30',
+        ]);
+
+        $this->postJson('/api/attendances/sync', [
+            'class_schedule_id' => $this->morning->id,
+            'attendance_date' => '2026-07-30',
+            'student_ids' => [],
+        ])->assertOk()
+            ->assertExactJson([]);
+
+        $this->assertSoftDeleted('attendances', [
+            'student_id' => $this->student->id,
+            'class_schedule_id' => $this->morning->id,
+        ]);
+    }
+
+    public function test_sync_allows_past_date_matching_weekday(): void
+    {
+        $this->postJson('/api/attendances/sync', [
+            'class_schedule_id' => $this->evening->id,
+            'branch_id' => $this->branch->id,
+            'attendance_date' => '2026-07-23',
+            'student_ids' => [$this->student->id],
+        ])->assertOk();
+
+        $this->assertTrue(
+            Attendance::query()
+                ->where('student_id', $this->student->id)
+                ->where('class_schedule_id', $this->evening->id)
+                ->whereDate('attendance_date', '2026-07-23')
+                ->exists()
+        );
+    }
+
+    public function test_sync_rejects_future_date(): void
+    {
+        $this->postJson('/api/attendances/sync', [
+            'class_schedule_id' => $this->morning->id,
+            'attendance_date' => '2026-07-31',
+            'student_ids' => [$this->student->id],
+        ])->assertStatus(422)
+            ->assertJsonValidationErrors(['attendance_date']);
+    }
+
+    public function test_sync_rejects_schedule_not_occurring_now(): void
+    {
+        $this->postJson('/api/attendances/sync', [
+            'class_schedule_id' => $this->evening->id,
+            'attendance_date' => '2026-07-30',
+            'student_ids' => [$this->student->id],
+        ])->assertStatus(422)
+            ->assertJsonValidationErrors(['class_schedule_id']);
+    }
+
+    public function test_sync_rolls_back_if_one_student_overlaps(): void
+    {
+        $otherBranch = Branch::query()->create([
+            'name' => 'Norte',
+            'is_active' => true,
+        ]);
+        $otherMorning = ClassSchedule::query()->create([
+            'instructor_id' => $this->instructor->id,
+            'branch_id' => $otherBranch->id,
+            'day_of_week' => 4,
+            'start_time' => '10:00',
+            'end_time' => '11:30',
+            'is_active' => true,
+        ]);
+        $otherStudent = Student::query()->create([
+            'first_name' => 'Luis',
+            'last_name' => 'Gómez',
+            'is_active' => true,
+        ]);
+
+        Attendance::query()->create([
+            'student_id' => $this->student->id,
+            'class_schedule_id' => $otherMorning->id,
+            'branch_id' => $otherBranch->id,
+            'attendance_date' => '2026-07-30',
+        ]);
+
+        $this->postJson('/api/attendances/sync', [
+            'class_schedule_id' => $this->morning->id,
+            'attendance_date' => '2026-07-30',
+            'student_ids' => [$otherStudent->id, $this->student->id],
+        ])->assertStatus(422)
+            ->assertJsonValidationErrors(['student_ids.0']);
+
+        $this->assertDatabaseMissing('attendances', [
+            'student_id' => $otherStudent->id,
+            'class_schedule_id' => $this->morning->id,
+        ]);
+    }
+
+    public function test_sync_restores_soft_deleted_attendance(): void
+    {
+        $created = Attendance::query()->create([
+            'student_id' => $this->student->id,
+            'class_schedule_id' => $this->morning->id,
+            'branch_id' => $this->branch->id,
+            'attendance_date' => '2026-07-30',
+        ]);
+        $created->delete();
+        $this->assertSoftDeleted('attendances', ['id' => $created->id]);
+
+        $response = $this->postJson('/api/attendances/sync', [
+            'class_schedule_id' => $this->morning->id,
+            'attendance_date' => '2026-07-30',
+            'student_ids' => [$this->student->id],
+        ])->assertOk();
+
+        $this->assertSame($created->id, $response->json('0.id'));
+        $this->assertDatabaseHas('attendances', [
+            'id' => $created->id,
+            'deleted_at' => null,
+        ]);
+    }
+
     public function test_store_rejects_branch_mismatch_without_sql_leak(): void
     {
         $otherBranch = Branch::query()->create([

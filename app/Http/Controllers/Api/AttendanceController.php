@@ -114,6 +114,65 @@ class AttendanceController extends Controller
         );
     }
 
+    public function sync(Request $request): JsonResponse
+    {
+        $data = $request->validate([
+            'class_schedule_id' => ['required', 'exists:class_schedules,id'],
+            'attendance_date' => ['required', 'date'],
+            'branch_id' => ['sometimes', 'exists:branches,id'],
+            'student_ids' => ['present', 'array'],
+            'student_ids.*' => ['integer', 'distinct', 'exists:students,id'],
+        ]);
+
+        $schedule = ClassSchedule::query()->findOrFail($data['class_schedule_id']);
+        $attendanceDate = Carbon::parse($data['attendance_date'])->toDateString();
+        $studentIds = array_values(array_unique(array_map('intval', $data['student_ids'])));
+        sort($studentIds);
+
+        $this->assertCanMark($data, $schedule, $attendanceDate);
+
+        try {
+            $attendances = DB::transaction(function () use ($data, $schedule, $attendanceDate, $studentIds) {
+                foreach ($studentIds as $index => $studentId) {
+                    $this->assertNoOverlappingPresence(
+                        $studentId,
+                        $schedule,
+                        $attendanceDate,
+                        "student_ids.{$index}",
+                    );
+
+                    $this->upsertAttendance([
+                        'student_id' => $studentId,
+                        'class_schedule_id' => $schedule->id,
+                        'attendance_date' => $attendanceDate,
+                        'notes' => $data['notes'] ?? null,
+                    ], $schedule);
+                }
+
+                $toRemove = Attendance::query()
+                    ->where('class_schedule_id', $schedule->id)
+                    ->whereDate('attendance_date', $attendanceDate)
+                    ->when($studentIds !== [], fn ($query) => $query->whereNotIn('student_id', $studentIds))
+                    ->get();
+
+                $toRemove->each->delete();
+
+                return Attendance::query()
+                    ->with(['student', 'branch', 'classSchedule.instructor'])
+                    ->where('class_schedule_id', $schedule->id)
+                    ->whereDate('attendance_date', $attendanceDate)
+                    ->orderBy('id')
+                    ->get();
+            });
+        } catch (UniqueConstraintViolationException) {
+            throw ValidationException::withMessages([
+                'student_ids' => ['No se pudo registrar la lista de asistencia. Inténtalo de nuevo.'],
+            ]);
+        }
+
+        return response()->json($attendances);
+    }
+
     public function destroy(Attendance $attendance): JsonResponse
     {
         $attendance->delete();
@@ -159,8 +218,12 @@ class AttendanceController extends Controller
         }
     }
 
-    private function assertNoOverlappingPresence(int $studentId, ClassSchedule $schedule, string $attendanceDate): void
-    {
+    private function assertNoOverlappingPresence(
+        int $studentId,
+        ClassSchedule $schedule,
+        string $attendanceDate,
+        string $errorKey = 'student_id',
+    ): void {
         $others = Attendance::query()
             ->where('student_id', $studentId)
             ->whereDate('attendance_date', $attendanceDate)
@@ -182,7 +245,7 @@ class AttendanceController extends Controller
                 : 'El alumno ya está presente en otro horario o sucursal.';
 
             throw ValidationException::withMessages([
-                'student_id' => [$message],
+                $errorKey => [$message],
             ]);
         }
     }

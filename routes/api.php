@@ -31,6 +31,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::apiResource('branches', BranchController::class);
     Route::apiResource('students', StudentController::class);
     Route::apiResource('membership-payments', MembershipPaymentController::class);
+    Route::post('attendances/sync', [AttendanceController::class, 'sync']);
     Route::apiResource('attendances', AttendanceController::class)->only(['index', 'store', 'destroy']);
     Route::apiResource('products', ProductController::class);
     Route::get('product-stocks', [ProductStockController::class, 'index']);
